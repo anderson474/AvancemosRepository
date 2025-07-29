@@ -94,47 +94,53 @@ function ProductSearch({ onAddProduct }) {
             autoComplete="off"
           />
         </div>
+        {/* La condición inicial para mostrar el <ul> sigue igual */}
         {(loading || results.length > 0) && (
           <ul className="absolute z-10 w-full mt-1 bg-white border rounded-md shadow-lg max-h-60 overflow-auto">
-            {loading && <li className="p-3 text-slate-500">Buscando...</li>}
-            {results.map((product) => {
-              // const details = [
-              //   product.products?.grade,
-              //   product.products?.period,
-              //   product.products?.session,
-              // ]
-              //   .filter(Boolean)
-              //   .join(" - ");
-
-              return (
+            {/* Usamos un operador ternario para decidir qué mostrar */}
+            {loading ? (
+              // Si está cargando, muestra esto
+              <li className="p-3 text-slate-500">Buscando...</li>
+            ) : (
+              // Si no está cargando, mapea los resultados
+              results.map((product) => (
                 <li
                   key={product.product_id}
                   onClick={() => handleSelectProduct(product)}
                   className="p-3 hover:bg-blue-50 cursor-pointer"
                 >
-                  <p className="font-semibold">{product.name}</p>
+                  {/* Título del producto */}
+                  <p className="font-semibold text-slate-800">{product.name}</p>
 
-                  <>
-                    <p className="text-xs text-slate-500">
-                      <strong>Grado: </strong>
-                      {product?.grade}
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      <strong>Periodo: </strong>
-                      {product?.period}
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      <strong>Sesión: </strong>
-                      {product?.session}
-                    </p>
-                  </>
+                  {/* Detalles del producto (grado, periodo, sesión) */}
+                  <div className="mt-1 space-y-0.5">
+                    {product.grade && (
+                      <p className="text-xs text-slate-500">
+                        <strong>Grado: </strong>
+                        {product.grade}
+                      </p>
+                    )}
+                    {product.period && (
+                      <p className="text-xs text-slate-500">
+                        <strong>Periodo: </strong>
+                        {product.period}
+                      </p>
+                    )}
+                    {product.session && (
+                      <p className="text-xs text-slate-500">
+                        <strong>Sesión: </strong>
+                        {product.session}
+                      </p>
+                    )}
+                  </div>
 
-                  <p className="text-sm text-slate-500 mt-1">
+                  {/* Stock del producto */}
+                  <p className="text-sm font-medium text-slate-600 mt-2">
                     Stock: {product.stock_actual}
                   </p>
                 </li>
-              );
-            })}
+              ))
+            )}
           </ul>
         )}
       </div>
@@ -268,7 +274,7 @@ export default function DispatchPage() {
         })
       ),
     };
-
+    console.log("Payload para la API:", payload);
     try {
       const response = await fetch("/api/inventory/dispatch", {
         method: "POST",
