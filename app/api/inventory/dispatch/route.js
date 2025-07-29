@@ -1,6 +1,8 @@
+// src/app/api/inventory/dispatch/route.js
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 import ExcelJS from "exceljs";
+import path from "path";
 
 export async function POST(request) {
   const supabase = await createClient();
@@ -9,12 +11,21 @@ export async function POST(request) {
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    if (!user) {
+    if (!user)
       return NextResponse.json({ error: "No autorizado" }, { status: 401 });
-    }
 
     const body = await request.json();
-    const { client_name, items } = body;
+    const {
+      client_name,
+      items,
+      funcionario,
+      direccion,
+      ciudad,
+      telefono,
+      celular,
+      barrio,
+      asesor,
+    } = body;
 
     if (!client_name || !items || items.length === 0) {
       return NextResponse.json(
@@ -23,162 +34,120 @@ export async function POST(request) {
       );
     }
 
-    // --- SQL para la nueva función de transacción en Supabase ---
-    /*
-    CREATE OR REPLACE FUNCTION handle_inventory_dispatch(
-      p_client_name TEXT,
-      p_items JSONB, -- Cambiado a JSONB para mejor manejo
-      p_user_id UUID
-    )
-    RETURNS INT -- Devuelve el nuevo número de remisión
-    LANGUAGE plpgsql
-    AS $$
-    DECLARE
-      new_dispatch_number INT;
-      new_dispatch_id UUID;
-      item RECORD;
-      current_stock_val INT;
-      total_quantity_to_dispatch INT;
-    BEGIN
-      -- 1. Validar stock para todos los productos ANTES de hacer cualquier cambio
-      -- El JSON ahora debe tener product_id, quantity, y extra_quantity
-      FOR item IN SELECT * FROM jsonb_to_recordset(p_items) AS x(
-        product_id UUID, 
-        quantity INT,
-        extra_quantity INT
-      )
-      LOOP
-        -- Calculamos la cantidad total a descontar del stock
-        total_quantity_to_dispatch := item.quantity + item.extra_quantity;
-
-        -- Validamos contra el stock actual
-        SELECT stock_actual INTO current_stock_val FROM current_stock WHERE product_id = item.product_id;
-        
-        IF current_stock_val IS NULL OR current_stock_val < total_quantity_to_dispatch THEN
-          RAISE EXCEPTION 'Stock insuficiente para el producto ID %. Requerido: %, Disponible: %', 
-            item.product_id, total_quantity_to_dispatch, current_stock_val;
-        END IF;
-      END LOOP;
-
-      -- 2. Obtener y bloquear el contador de remisiones
-      UPDATE app_settings SET value = (value::INT + 1)::TEXT
-      WHERE key = 'next_dispatch_number'
-      RETURNING value::INT - 1 INTO new_dispatch_number;
-
-      -- 3. Crear el registro de despacho
-      INSERT INTO dispatches (dispatch_number) VALUES (new_dispatch_number)
-      RETURNING id INTO new_dispatch_id;
-
-      -- 4. Registrar los movimientos de salida, ahora con la cantidad extra por item
-      FOR item IN SELECT * FROM jsonb_to_recordset(p_items) AS x(
-        product_id UUID, 
-        quantity INT,
-        extra_quantity INT
-      )
-      LOOP
-        INSERT INTO inventory_movements (
-          product_id, type, quantity, client_name, 
-          extra_quantity, dispatch_id, user_id
-        )
-        VALUES (
-          item.product_id, 
-          'salida', 
-          item.quantity, -- La cantidad normal
-          p_client_name, 
-          item.extra_quantity, -- La cantidad extra específica de este item
-          new_dispatch_id, 
-          p_user_id
-        );
-      END LOOP;
-      
-      RETURN new_dispatch_number;
-    END;
-    $$;
-    */
-
     const { data: dispatchNumber, error: rpcError } = await supabase.rpc(
-      "handle_inventory_dispatch",
+      "handle_dispatch_with_extras",
       {
         p_client_name: client_name,
-        p_items: items,
+        p_items: items.map(({ product_id, quantity, extra_quantity }) => ({
+          product_id,
+          quantity,
+          extra_quantity,
+        })),
         p_user_id: user.id,
+        // Nuevos parámetros para la RPC
+        p_funcionario: funcionario,
+        p_direccion: direccion,
+        p_ciudad: ciudad,
+        p_telefono: telefono,
+        p_celular: celular,
+        p_barrio: barrio,
+        p_asesor: asesor,
       }
     );
 
     if (rpcError) {
-      console.error("Error en RPC handle_inventory_dispatch:", rpcError);
+      console.error("Error en RPC:", rpcError);
       if (rpcError.message.includes("Stock insuficiente")) {
-        return NextResponse.json(
-          { error: "Stock insuficiente para uno de los productos." },
-          { status: 409 }
-        );
+        return NextResponse.json({ error: rpcError.message }, { status: 409 });
       }
       throw new Error("Error al procesar el despacho en la base de datos.");
     }
 
-    // --- GENERACIÓN DEL ARCHIVO EXCEL (MEJORADO) ---
+    // ... (dentro de la función POST, después de la llamada RPC exitosa)
+
+    // --- GENERACIÓN DEL EXCEL USANDO UNA PLANTILLA ---
     const workbook = new ExcelJS.Workbook();
-    workbook.creator = "Sistema de Inventarios";
-    workbook.created = new Date();
 
-    const worksheet = workbook.addWorksheet(`Remisión ${dispatchNumber}`);
+    // 1. Cargar la plantilla
+    const templatePath = path.join(
+      process.cwd(),
+      "templates",
+      "remision_template.xlsx"
+    );
+    await workbook.xlsx.readFile(templatePath);
 
-    worksheet.mergeCells("A1:E1");
-    worksheet.getCell("A1").value = `REMISIÓN DE PEDIDOS N° ${dispatchNumber}`;
-    worksheet.getCell("A1").font = { size: 16, bold: true };
-    worksheet.getCell("A1").alignment = { horizontal: "center" };
+    // 2. Obtener la hoja de trabajo (worksheet) que vamos a editar.
+    // Asumimos que se llama 'Remisión' o es la primera hoja.
+    const worksheet = workbook.getWorksheet("Plantilla"); // O workbook.getWorksheet('NombreDeLaHoja');
 
-    worksheet.getCell("A3").value = "Fecha de Entrega:";
-    worksheet.getCell("B3").value = new Date().toLocaleDateString("es-CO");
-    worksheet.getCell("A4").value = "Cliente:";
-    worksheet.getCell("B4").value = client_name;
-    worksheet.mergeCells("B4:E4");
+    // 3. Escribir los datos en las celdas específicas.
+    // ¡Aquí solo necesitas saber las coordenadas de las celdas!
+    const today = new Date();
 
-    worksheet.getRow(6).values = [
-      "ID Producto",
-      "Nombre Producto",
-      "Cantidad",
-      "Cantidad Extra",
-      "Total Salida",
-    ];
-    worksheet.getRow(6).font = { bold: true };
-    worksheet.getRow(6).eachCell((cell) => {
-      cell.fill = {
-        type: "pattern",
-        pattern: "solid",
-        fgColor: { argb: "FFD3D3D3" },
-      };
-      cell.border = {
-        bottom: { style: "thin" },
-      };
-    });
+    worksheet.getCell("B4").value = `Nº ${dispatchNumber}`; // Celda para el número de remisión
+    worksheet.getCell("D6").value = `D ${today.getDate()}`; // Celda para el día
+    worksheet.getCell("E6").value = `M ${today
+      .toLocaleString("es-CO", { month: "short" })
+      .toUpperCase()
+      .replace(".", "")}`; // Mes
+    worksheet.getCell("F6").value = `AA ${today.getFullYear()}`; // Año
 
+    worksheet.getCell("C8").value = client_name; // Institución
+    worksheet.getCell("D10").value = funcionario || "";
+    worksheet.getCell("C12").value = direccion || "";
+    worksheet.getCell("D14").value = ciudad || "";
+    worksheet.getCell("I8").value = telefono || "";
+    worksheet.getCell("I10").value = celular || "";
+    worksheet.getCell("I12").value = barrio || "";
+    worksheet.getCell("H14").value = asesor || "";
+
+    // // client_name,
+    //   items,
+    //   funcionario,
+    //   direccion,
+    //   ciudad,
+    //   telefono,
+    //   celular,
+    //   barrio,
+    //   asesor,
+
+    // 4. Escribir los datos de los productos en la tabla.
+    // Empezamos a escribir en la fila 19 (ajusta si tu plantilla es diferente).
+    let currentRow = 18;
     let totalGeneral = 0;
-    items.forEach((item, index) => {
-      const row = worksheet.getRow(7 + index);
+
+    items.forEach((item) => {
+      const row = worksheet.getRow(currentRow);
       const totalItem = item.quantity + item.extra_quantity;
       totalGeneral += totalItem;
-      row.values = [
-        item.product_id,
-        item.name,
-        item.quantity,
-        item.extra_quantity,
-        totalItem,
-      ];
+      // //name,
+      //   quantity,
+      //   extra_quantity: Number(extra_quantity) || 0,
+      //   product_type, // Enviamos el tipo para el Excel
+      //   session,
+      //   period,
+      //   grade,
+      // Escribimos en las celdas por su número de columna
+      row.getCell(2).value = item.name; // Columna B: PRODUCTO SOLICITADO
+      row.getCell(5).value = item.quantity; // Columna D: CANTIDAD ENTREGADA
+      row.getCell(7).value = item.extra_quantity;
+      row.getCell(9).value = item.product_type;
+      row.getCell(6).value = item.session; // Columna F: SESIÓN
+      row.getCell(10).value = item.period; // Columna G: PER
+      row.getCell(8).value = item.grade; // Columna H: GRADO
+      row.getCell(11).value = totalItem; // Columna H: TOTAL SALIDA
+
+      // Si necesitas que la fila herede los estilos de una fila de plantilla, puedes hacerlo.
+      // Por ahora, asumimos que las filas ya tienen el formato correcto.
+
+      currentRow++;
     });
 
-    const lastDataRow = 7 + items.length;
-    worksheet.getCell(`D${lastDataRow + 1}`).value = "Total General:";
-    worksheet.getCell(`D${lastDataRow + 1}`).font = { bold: true };
-    worksheet.getCell(`E${lastDataRow + 1}`).value = totalGeneral;
-    worksheet.getCell(`E${lastDataRow + 1}`).font = { bold: true };
-
-    worksheet.columns.forEach((column) => {
-      column.width = column.header === "ID Producto" ? 40 : 20;
-    });
+    // 5. Escribir el total general
+    // Encuentra la celda del total y escribe el valor (ej. H30)
+    worksheet.getCell("K32").value = totalGeneral;
 
     const buffer = await workbook.xlsx.writeBuffer();
-
     const headers = new Headers();
     headers.append(
       "Content-Type",
@@ -191,14 +160,11 @@ export async function POST(request) {
     headers.append("X-Dispatch-Number", dispatchNumber);
     headers.append("Access-Control-Expose-Headers", "X-Dispatch-Number");
 
-    return new NextResponse(buffer, {
-      status: 200,
-      headers: headers,
-    });
+    return new NextResponse(buffer, { status: 200, headers });
   } catch (error) {
     console.error("Error en API /inventory/dispatch:", error);
     return NextResponse.json(
-      { error: error.message || "Ocurrió un error inesperado en el servidor." },
+      { error: error.message || "Error interno del servidor." },
       { status: 500 }
     );
   }

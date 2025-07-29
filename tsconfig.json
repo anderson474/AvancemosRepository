@@ -21,7 +21,7 @@
     ],
     "paths": {
       "@/*": ["./*"],
-      "@*": ["./app*"]
+      "@*": ["./app/*"]
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts", "app/page.jsx", "app/(dashboard)/dashboard/page.jsx", "app/(dashboard)/inventory/entry/page.jsx", "app/(dashboard)/inventory/dispatch/page.t¿jsx"],
