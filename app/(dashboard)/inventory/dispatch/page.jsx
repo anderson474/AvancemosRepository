@@ -31,7 +31,7 @@ function ProductSearch({ onAddProduct }) {
       // Hacemos un JOIN con la tabla 'products' para obtener los detalles
       const { data, error } = await supabase
         .from("current_stock")
-        .select("*, products(grade, period, session)") // ¡Aquí está la magia!
+        .select("*") // ¡Aquí está la magia!
         .ilike("name", `%${term}%`)
         .gt("stock_actual", 0)
         .limit(5);
@@ -39,6 +39,7 @@ function ProductSearch({ onAddProduct }) {
       if (error) {
         console.error("Error searching products:", error);
       } else if (data) {
+        //console.log("Productos encontrados:", data);
         setResults(data);
       }
       setLoading(false);
@@ -97,13 +98,13 @@ function ProductSearch({ onAddProduct }) {
           <ul className="absolute z-10 w-full mt-1 bg-white border rounded-md shadow-lg max-h-60 overflow-auto">
             {loading && <li className="p-3 text-slate-500">Buscando...</li>}
             {results.map((product) => {
-              const details = [
-                product.products?.grade,
-                product.products?.period,
-                product.products?.session,
-              ]
-                .filter(Boolean)
-                .join(" - ");
+              // const details = [
+              //   product.products?.grade,
+              //   product.products?.period,
+              //   product.products?.session,
+              // ]
+              //   .filter(Boolean)
+              //   .join(" - ");
 
               return (
                 <li
@@ -112,9 +113,22 @@ function ProductSearch({ onAddProduct }) {
                   className="p-3 hover:bg-blue-50 cursor-pointer"
                 >
                   <p className="font-semibold">{product.name}</p>
-                  {details && (
-                    <p className="text-xs text-slate-500">{details}</p>
-                  )}
+
+                  <>
+                    <p className="text-xs text-slate-500">
+                      <strong>Grado: </strong>
+                      {product?.grade}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      <strong>Periodo: </strong>
+                      {product?.period}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      <strong>Sesión: </strong>
+                      {product?.session}
+                    </p>
+                  </>
+
                   <p className="text-sm text-slate-500 mt-1">
                     Stock: {product.stock_actual}
                   </p>
