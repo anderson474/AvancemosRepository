@@ -11,6 +11,12 @@ export default {
   theme: {
     extend: {
       colors: {
+        verde: '#96b422',
+        azul: '#305398',
+        morado: '#af4291',
+        amarillo: '#fbba25',
+        naranja: '#f39327',
+        violeta: '#7f5da4',
         background: "hsl(var(--background))",
         foreground: "hsl(var(--foreground))",
         card: {
