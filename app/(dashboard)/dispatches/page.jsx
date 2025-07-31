@@ -5,7 +5,7 @@ import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { MagnifyingGlassIcon, PrinterIcon } from "@heroicons/react/24/outline";
 
-// Función para formatear la fecha
+// Función para formatear la fecha a un formato legible
 const formatDate = (dateString) => {
   if (!dateString) return "N/A";
   const options = { year: "numeric", month: "long", day: "numeric" };
@@ -18,33 +18,16 @@ export default function DispatchesPage() {
   const [filteredDispatches, setFilteredDispatches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
+  // Estado para controlar qué remisión se está reimprimiendo
+  const [reprintingId, setReprintingId] = useState(null);
 
+  // Efecto para obtener las remisiones desde la base de datos
   useEffect(() => {
     const fetchDispatches = async () => {
       setLoading(true);
 
-      // Necesitamos una consulta que una las remisiones con sus movimientos
-      // La mejor forma es crear una VISTA en Supabase.
-      /*
-        -- Ejecuta esto en tu editor SQL de Supabase --
-        CREATE OR REPLACE VIEW dispatch_details AS
-        SELECT 
-            d.id,
-            d.dispatch_number,
-            d.created_at,
-            mv.client_name,
-            COUNT(mv.id) as item_count,
-            SUM(mv.quantity) as total_quantity
-        FROM 
-            dispatches d
-        JOIN 
-            inventory_movements mv ON d.id = mv.dispatch_id
-        WHERE
-            mv.type = 'salida'
-        GROUP BY
-            d.id, d.dispatch_number, d.created_at, mv.client_name;
-      */
-
+      // Usamos la vista 'dispatch_details' que creaste en Supabase.
+      // Es la forma más eficiente de obtener los datos agregados.
       const { data, error } = await supabase
         .from("dispatch_details")
         .select("*")
@@ -54,7 +37,7 @@ export default function DispatchesPage() {
         setDispatches(data);
         setFilteredDispatches(data);
       } else {
-        console.error("Error fetching dispatches:", error);
+        console.error("Error al obtener las remisiones:", error);
       }
       setLoading(false);
     };
@@ -62,29 +45,57 @@ export default function DispatchesPage() {
     fetchDispatches();
   }, [supabase]);
 
-  // Filtrar remisiones
+  // Efecto para filtrar las remisiones según el término de búsqueda
   useEffect(() => {
     if (searchTerm === "") {
       setFilteredDispatches(dispatches);
     } else {
+      const lowercasedFilter = searchTerm.toLowerCase();
       setFilteredDispatches(
         dispatches.filter(
           (d) =>
-            d.dispatch_number.toString().includes(searchTerm) ||
-            d.client_name.toLowerCase().includes(searchTerm.toLowerCase())
+            d.dispatch_number.toString().includes(lowercasedFilter) ||
+            d.client_name.toLowerCase().includes(lowercasedFilter)
         )
       );
     }
   }, [searchTerm, dispatches]);
 
-  const handleReprint = (dispatch) => {
-    // Aquí podríamos llamar a una API que regenere el Excel.
-    // Por ahora, mostraremos un alert.
-    alert(
-      `Reimprimiendo remisión N° ${dispatch.dispatch_number} para ${dispatch.client_name}`
-    );
-    // En una implementación real:
-    // window.open(`/api/inventory/reprint-dispatch?id=${dispatch.id}`, '_blank');
+  // Función para manejar la reimpresión de una remisión
+  const handleReprint = async (dispatch) => {
+    if (!dispatch || !dispatch.dispatch_id) {
+      alert("Error: No se puede reimprimir una remisión sin ID.");
+      return;
+    }
+    console.log("Reimprimiendo remisión:", dispatch);
+    setReprintingId(dispatch.dispatch_id);
+
+    try {
+      const response = await fetch(
+        `/api/inventory/reprint-dispatch?id=${dispatch.dispatch_id}`
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "No se pudo generar el informe.");
+      }
+
+      // Lógica para descargar el archivo Excel
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `REMISION_${dispatch.dispatch_number}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("Error al reimprimir:", error);
+      alert(`Error al generar el informe: ${error.message}`);
+    } finally {
+      setReprintingId(null); // Detiene el estado de carga, tanto si tuvo éxito como si falló
+    }
   };
 
   return (
@@ -98,12 +109,12 @@ export default function DispatchesPage() {
         </p>
       </header>
 
-      <div className="bg-white p-6 rounded-lg shadow">
-        <div className="flex justify-between items-center mb-4">
+      <div className="bg-white p-6 rounded-lg shadow-md border">
+        <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
           <h2 className="text-2xl font-semibold text-slate-700">
             Remisiones Generadas
           </h2>
-          <div className="relative">
+          <div className="relative w-full md:w-auto">
             <MagnifyingGlassIcon className="pointer-events-none absolute top-1/2 left-3 h-5 w-5 text-slate-400 transform -translate-y-1/2" />
             <input
               type="text"
@@ -117,62 +128,80 @@ export default function DispatchesPage() {
 
         <div className="overflow-x-auto">
           {loading ? (
-            <p className="text-center py-10">Cargando remisiones...</p>
+            <p className="text-center py-10 text-slate-500">
+              Cargando remisiones...
+            </p>
           ) : (
             <table className="min-w-full divide-y divide-slate-200">
               <thead className="bg-slate-50">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
                     N° Remisión
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
                     Fecha
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
                     Cliente
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
                     Total Items
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase">
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
                     Acciones
                   </th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-slate-200">
                 {filteredDispatches.length > 0 ? (
-                  filteredDispatches.map((dispatch) => (
-                    <tr key={dispatch.id} className="hover:bg-slate-50">
-                      <td className="px-6 py-4 whitespace-nowrap font-medium text-blue-600">
-                        #{dispatch.dispatch_number}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        {formatDate(dispatch.created_at)}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        {dispatch.client_name}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        {dispatch.total_quantity} ({dispatch.item_count} tipos)
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <button
-                          onClick={() => handleReprint(dispatch)}
-                          className="text-blue-600 hover:text-blue-800 flex items-center gap-1"
-                        >
-                          <PrinterIcon className="h-5 w-5" />
-                          <span>Reimprimir</span>
-                        </button>
-                      </td>
-                    </tr>
-                  ))
+                  filteredDispatches.map((dispatch) => {
+                    const isReprinting = reprintingId === dispatch.dispatch_id;
+                    return (
+                      <tr
+                        key={dispatch.dispatch_id}
+                        className="hover:bg-slate-50 transition-colors"
+                      >
+                        <td className="px-6 py-4 whitespace-nowrap font-medium text-blue-600">
+                          #{dispatch.dispatch_number}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-slate-700">
+                          {formatDate(dispatch.created_at)}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-slate-700">
+                          {dispatch.client_name}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-slate-700">
+                          {dispatch.total_quantity} ({dispatch.item_count}{" "}
+                          tipos)
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <button
+                            onClick={() => handleReprint(dispatch)}
+                            disabled={isReprinting}
+                            className="text-blue-600 hover:text-blue-800 flex items-center gap-1.5 transition-colors disabled:opacity-50 disabled:cursor-wait"
+                          >
+                            <PrinterIcon
+                              className={`h-5 w-5 ${
+                                isReprinting ? "animate-spin" : ""
+                              }`}
+                            />
+                            <span>
+                              {isReprinting ? "Generando..." : "Reimprimir"}
+                            </span>
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
                 ) : (
-                  <tr>
+                  // CORRECCIÓN: Se añade una 'key' única al tr del estado vacío.
+                  <tr key="no-results-row">
                     <td
                       colSpan="5"
                       className="text-center py-10 text-slate-500"
                     >
-                      No se encontraron remisiones.
+                      No se encontraron remisiones que coincidan con la
+                      búsqueda.
                     </td>
                   </tr>
                 )}
