@@ -5,40 +5,30 @@ import { NextResponse } from "next/server";
 import ExcelJS from "exceljs";
 import path from "path";
 
-// Esta función manejará peticiones GET
 export async function GET(request) {
   console.log("\n--- [API /reprint-dispatch] INICIANDO PETICIÓN GET ---");
-  const supabase = createClient(); // RECUERDA: Sin 'await' aquí.
+  const supabase = await createClient();
 
   try {
-    // 1. Verificar autenticación
+    // 1. Verificar autenticación (Sin cambios aquí)
     console.log("[LOG] 1. Verificando autenticación de usuario...");
     const {
       data: { user },
       error: authError,
     } = await supabase.auth.getUser();
 
-    if (authError) {
-      console.error(
-        "[ERROR] Error de autenticación en Supabase:",
-        authError.message
-      );
-      throw new Error("Fallo en la autenticación.");
-    }
-
-    if (!user) {
-      console.warn("[WARN] Usuario no autenticado. Denegando acceso.");
+    if (authError || !user) {
+      console.error("[ERROR] Autenticación fallida:", authError?.message);
       return NextResponse.json({ error: "No autorizado" }, { status: 401 });
     }
     console.log(`[LOG] Usuario autenticado: ${user.email}`);
 
-    // 2. Obtener el ID de la remisión
+    // 2. Obtener el ID de la remisión (Sin cambios aquí)
     const { searchParams } = new URL(request.url);
     const dispatchId = searchParams.get("id");
     console.log(`[LOG] 2. ID de remisión recibido de la URL: ${dispatchId}`);
 
     if (!dispatchId) {
-      console.warn("[WARN] No se proporcionó un ID de remisión en la URL.");
       return NextResponse.json(
         { error: "Falta el ID de la remisión" },
         { status: 400 }
@@ -46,50 +36,54 @@ export async function GET(request) {
     }
 
     // 3. Obtener los datos generales del despacho
+    // --- CAMBIO 1: Ser más específico en la selección para mayor claridad ---
+    // Solo necesitamos el número y la fecha de la tabla 'dispatches'.
     console.log(
       `[LOG] 3. Buscando datos para la remisión con ID: ${dispatchId}`
     );
     const { data: dispatchData, error: dispatchError } = await supabase
       .from("dispatches")
-      .select("*")
+      .select("dispatch_number, created_at") // Solo pedimos lo que necesitamos de aquí
       .eq("id", dispatchId)
       .single();
 
-    if (dispatchError) {
+    if (dispatchError || !dispatchData) {
       console.error(
-        "[ERROR] Error al buscar en la tabla 'dispatches':",
-        dispatchError.message
-      );
-      throw new Error("Error de base de datos al buscar la remisión.");
-    }
-
-    if (!dispatchData) {
-      console.error(
-        `[ERROR] No se encontró ninguna remisión con el ID: ${dispatchId}`
+        `[ERROR] No se encontró la remisión con ID: ${dispatchId}`,
+        dispatchError?.message
       );
       throw new Error("No se encontró la remisión especificada.");
     }
     console.log("[LOG] Datos de la remisión encontrados:", dispatchData);
 
-    // 4. Obtener los items asociados
+    // 4. Obtener los items asociados Y LOS DATOS DE CABECERA
     console.log(
       `[LOG] 4. Buscando items para la remisión con ID: ${dispatchId}`
     );
+    // --- CAMBIO 2: Modificar la consulta a 'inventory_movements' ---
+    // Ahora también pedimos los campos que necesitamos para la cabecera del Excel.
     const { data: items, error: itemsError } = await supabase
       .from("inventory_movements")
       .select(
-        `quantity, extra_quantity, products(name, product_type, session, period, grade)`
+        `
+        quantity, extra_quantity, client_name, funcionario, direccion, ciudad, telefono, celular, barrio, asesor,
+        products(name, product_type, session, period, grade)
+      `
       )
       .eq("dispatch_id", dispatchId);
 
     if (itemsError) {
-      console.error(
-        "[ERROR] Error al buscar en la tabla 'inventory_movements':",
-        itemsError.message
-      );
       throw new Error("Error al obtener los productos de la remisión.");
     }
-    console.log(`[LOG] Encontrados ${items.length} items asociados:`, items);
+
+    // --- CAMBIO 3: Añadir una validación ---
+    // Nos aseguramos de que la remisión tenga al menos un item.
+    if (!items || items.length === 0) {
+      throw new Error(
+        "No se encontraron items asociados a esta remisión."
+      );
+    }
+    console.log(`[LOG] Encontrados ${items.length} items asociados.`, items);
 
     // 5. Generación del Excel
     console.log("[LOG] 5. Iniciando generación del archivo Excel...");
@@ -100,33 +94,15 @@ export async function GET(request) {
       "remision_template.xlsx"
     );
 
-    try {
-      await workbook.xlsx.readFile(templatePath);
-      console.log(
-        "[LOG] Plantilla de Excel cargada correctamente desde:",
-        templatePath
-      );
-    } catch (templateError) {
-      console.error(
-        "[ERROR CRÍTICO] No se pudo encontrar o leer la plantilla de Excel:",
-        templateError.message
-      );
-      throw new Error(
-        "Falta el archivo de plantilla 'remision_template.xlsx'."
-      );
-    }
-
+    await workbook.xlsx.readFile(templatePath);
     const worksheet = workbook.getWorksheet("Plantilla");
-    if (!worksheet) {
-      console.error(
-        "[ERROR CRÍTICO] La hoja de trabajo 'Plantilla' no existe en el archivo Excel."
-      );
-      throw new Error("La plantilla no contiene una hoja llamada 'Plantilla'.");
-    }
 
+    // --- CAMBIO 4: Usar los datos correctos para la cabecera ---
+    // La información de la cabecera se toma del primer item, ya que es la misma para todos.
+    const headerData = items[0];
     const createdAt = new Date(dispatchData.created_at);
 
-    // Llenar datos de cabecera
+    // Llenar datos de cabecera usando 'dispatchData' y 'headerData'
     worksheet.getCell("B4").value = `Nº ${dispatchData.dispatch_number}`;
     worksheet.getCell("D6").value = `D ${createdAt.getDate()}`;
     worksheet.getCell("E6").value = `M ${createdAt
@@ -134,17 +110,17 @@ export async function GET(request) {
       .toUpperCase()
       .replace(".", "")}`;
     worksheet.getCell("F6").value = `AA ${createdAt.getFullYear()}`;
-    worksheet.getCell("C8").value = dispatchData.client_name;
-    worksheet.getCell("D10").value = dispatchData.funcionario || "";
-    worksheet.getCell("C12").value = dispatchData.direccion || "";
-    worksheet.getCell("D14").value = dispatchData.ciudad || "";
-    worksheet.getCell("I8").value = dispatchData.telefono || "";
-    worksheet.getCell("I10").value = dispatchData.celular || "";
-    worksheet.getCell("I12").value = dispatchData.barrio || "";
-    worksheet.getCell("H14").value = dispatchData.asesor || "";
+    worksheet.getCell("C8").value = headerData.client_name;
+    worksheet.getCell("D10").value = headerData.funcionario || "";
+    worksheet.getCell("C12").value = headerData.direccion || "";
+    worksheet.getCell("D14").value = headerData.ciudad || "";
+    worksheet.getCell("I8").value = headerData.telefono || "";
+    worksheet.getCell("I10").value = headerData.celular || "";
+    worksheet.getCell("I12").value = headerData.barrio || "";
+    worksheet.getCell("H14").value = headerData.asesor || "";
     console.log("[LOG] Datos de cabecera escritos en el Excel.");
 
-    // Llenar la tabla de productos
+    // Llenar la tabla de productos (sin cambios en este bucle)
     let currentRow = 18;
     let totalGeneral = 0;
     items.forEach((item, index) => {
@@ -154,10 +130,8 @@ export async function GET(request) {
 
       const productDetails = item.products;
       if (!productDetails) {
-        console.warn(
-          `[WARN] El item ${index} no tiene detalles de producto (products es null). Saltando este item.`
-        );
-        return; // Saltar al siguiente item si no hay datos de producto
+        console.warn(`[WARN] Item ${index} sin detalles de producto.`);
+        return;
       }
 
       row.getCell(2).value = productDetails.name;
@@ -172,11 +146,11 @@ export async function GET(request) {
     });
     console.log("[LOG] Datos de productos escritos en el Excel.");
 
-    // Escribir el total general
+    // Escribir el total general (sin cambios aquí)
     worksheet.getCell("K32").value = totalGeneral;
     console.log(`[LOG] Total general (${totalGeneral}) escrito en el Excel.`);
 
-    // 6. Generar y enviar la respuesta
+    // 6. Generar y enviar la respuesta (sin cambios aquí)
     console.log("[LOG] 6. Generando buffer y preparando la respuesta final...");
     const buffer = await workbook.xlsx.writeBuffer();
     const headers = new Headers();
@@ -196,8 +170,6 @@ export async function GET(request) {
   } catch (error) {
     console.error("\n--- [ERROR EN API /reprint-dispatch] ---");
     console.error("Mensaje de error:", error.message);
-    // Para ver más detalles del error, puedes imprimir el objeto de error completo
-    // console.error("Objeto de error completo:", error);
     console.error("--- FIN DEL REPORTE DE ERROR ---\n");
     return NextResponse.json(
       { error: error.message || "Error interno del servidor." },

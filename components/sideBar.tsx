@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { User } from "@supabase/supabase-js";
+
 import {
   ChartBarIcon,
   ArchiveBoxIcon,
@@ -47,7 +48,7 @@ export default function Sidebar() {
   const [loading, setLoading] = useState(true);
   const pathname = usePathname();
   const supabase = createClient();
-
+  const router = useRouter()
   // 3. Estado para controlar si el desplegable de inventario está abierto
   // Lo inicializamos como abierto si la URL actual es una de sus sub-rutas
   const [isInventoryOpen, setIsInventoryOpen] = useState(
@@ -76,12 +77,17 @@ export default function Sidebar() {
     };
   }, [supabase]);
 
-  const handleSignOut = () => {
-    const form = document.getElementById("logout-form") as HTMLFormElement;
-    if (form) {
-      form.requestSubmit();
+  const handleSignOut = async () => {
+    
+    const { error } = await supabase.auth.signOut();
+
+    if (error) {
+      console.error("Error signing out:", error.message);
+      return;
     }
-  };
+
+    router.push('./')
+  }
 
   if (loading) {
     // El esqueleto de carga no necesita cambios
@@ -118,25 +124,22 @@ export default function Sidebar() {
                   <li key={link.name}>
                     <button
                       onClick={() => setIsInventoryOpen(!isInventoryOpen)}
-                      className={`flex items-center w-full px-3 py-3 my-1 rounded-lg transition-colors ${
-                        isParentActive
+                      className={`flex items-center w-full px-3 py-3 my-1 rounded-lg transition-colors ${isParentActive
                           ? "bg-blue-600 text-white shadow-sm"
                           : "hover:bg-gray-100"
-                      }`}
+                        }`}
                     >
                       <link.icon className="h-6 w-6 mr-3" />
                       <span className="flex-1 text-left">{link.name}</span>
                       <ChevronDownIcon
-                        className={`h-5 w-5 transition-transform ${
-                          isInventoryOpen ? "rotate-180" : ""
-                        }`}
+                        className={`h-5 w-5 transition-transform ${isInventoryOpen ? "rotate-180" : ""
+                          }`}
                       />
                     </button>
                     {/* Contenedor del submenú con animación */}
                     <div
-                      className={`overflow-hidden transition-all duration-300 ease-in-out ${
-                        isInventoryOpen ? "max-h-40" : "max-h-0"
-                      }`}
+                      className={`overflow-hidden transition-all duration-300 ease-in-out ${isInventoryOpen ? "max-h-40" : "max-h-0"
+                        }`}
                     >
                       <ul className="pl-6 mt-1">
                         {link.subLinks.map((subLink) => {
@@ -145,11 +148,10 @@ export default function Sidebar() {
                             <li key={subLink.name}>
                               <Link
                                 href={subLink.href}
-                                className={`flex items-center px-3 py-3 my-1 rounded-lg transition-colors text-sm ${
-                                  isSubActive
+                                className={`flex items-center px-3 py-3 my-1 rounded-lg transition-colors text-sm ${isSubActive
                                     ? "bg-blue-100 text-blue-700 font-semibold"
                                     : "text-gray-600 hover:bg-gray-100"
-                                }`}
+                                  }`}
                               >
                                 <subLink.icon className="h-5 w-5 mr-3" />
                                 <span>{subLink.name}</span>
@@ -171,11 +173,10 @@ export default function Sidebar() {
                 <li key={link.name}>
                   <Link
                     href={link.href}
-                    className={`flex items-center px-3 py-3 my-1 rounded-lg transition-colors ${
-                      isActive
+                    className={`flex items-center px-3 py-3 my-1 rounded-lg transition-colors ${isActive
                         ? "bg-blue-600 text-white shadow-sm"
                         : "hover:bg-gray-100"
-                    }`}
+                      }`}
                   >
                     <link.icon className="h-6 w-6 mr-3" />
                     <span>{link.name}</span>
@@ -217,3 +218,4 @@ export default function Sidebar() {
     </aside>
   );
 }
+

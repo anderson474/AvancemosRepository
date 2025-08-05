@@ -72,7 +72,7 @@ export default function DispatchesPage() {
 
     try {
       const response = await fetch(
-        `/api/inventory/reprint-dispatch?id=${dispatch.dispatch_id}`
+        `/api/reprint-dispatch?id=${dispatch.dispatch_id}`
       );
 
       if (!response.ok) {
